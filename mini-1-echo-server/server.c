@@ -11,45 +11,55 @@
 int message_count = 0;
 pthread_mutex_t lock;
 
-void* handle_client(void* socket_desc)
+struct client_info {
+    int sock;
+    char ip[INET_ADDRSTRLEN];
+};
+
+void* handle_client(void* arg)
 {
-    int client_sock = *(int*)socket_desc;
+    struct client_info *info = (struct client_info*)arg;
+    int client_sock = info->sock;
+    char client_ip[INET_ADDRSTRLEN];
+    strcpy(client_ip, info->ip);
+    free(info);
+
     char buffer[BUF_SIZE];
     char reply[BUF_SIZE * 2];
 
     while (1)
     {
         memset(buffer, 0, BUF_SIZE);
-        int read_size = recv(client_sock, buffer, BUF_SIZE, 0);
+        int read_size = recv(client_sock, buffer, BUF_SIZE - 1, 0);
 
         if (read_size <= 0)
             break;
 
-        // Increase global message counter safely
         pthread_mutex_lock(&lock);
         message_count++;
         int current_count = message_count;
         pthread_mutex_unlock(&lock);
 
-        // buffer format: <timestamp>|<message>
-        char *timestamp = strtok(buffer, "|");
+        char data[BUF_SIZE];
+        strcpy(data, buffer);
+
+        char *timestamp = strtok(data, "|");
         char *message = strtok(NULL, "|");
 
         snprintf(reply, sizeof(reply),
-                 "Server Echo:\nMessage: %s\nTimestamp: %s\nTotal Messages: %d\n\n",
-                 message, timestamp, current_count);
+                 "Server Echo:\nMessage: %sTimestamp: %s\nTotal Messages: %d\nClient IP: %s\n\n",
+                 message, timestamp, current_count, client_ip);
 
         send(client_sock, reply, strlen(reply), 0);
     }
 
     close(client_sock);
-    free(socket_desc);
     return NULL;
 }
 
 int main()
 {
-    int server_fd, client_sock;
+    int server_fd;
     struct sockaddr_in server, client;
     socklen_t c = sizeof(client);
 
@@ -66,13 +76,16 @@ int main()
 
     printf("Echo Server running on port %d...\n", PORT);
 
-    while ((client_sock = accept(server_fd, (struct sockaddr*)&client, &c)))
+    while (1)
     {
-        pthread_t thread_id;
-        int *new_sock = malloc(sizeof(int));
-        *new_sock = client_sock;
+        int client_sock = accept(server_fd, (struct sockaddr*)&client, &c);
 
-        pthread_create(&thread_id, NULL, handle_client, (void*)new_sock);
+        struct client_info *info = malloc(sizeof(struct client_info));
+        info->sock = client_sock;
+        inet_ntop(AF_INET, &client.sin_addr, info->ip, INET_ADDRSTRLEN);
+
+        pthread_t thread_id;
+        pthread_create(&thread_id, NULL, handle_client, info);
         pthread_detach(thread_id);
     }
 
