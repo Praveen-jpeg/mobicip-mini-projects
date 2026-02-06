@@ -1,43 +1,56 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <arpa/inet.h>
+#include <netdb.h>
 #include <time.h>
+#include <stdlib.h>
 
-#define PORT 8080
+#define PORT "8080"
 #define BUF_SIZE 1024
 
-int main()
+int main(int argc, char *argv[])
 {
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <server-ip>\n", argv[0]);
+        return 1;
+    }
+
     int sock;
-    struct sockaddr_in server;
+    struct addrinfo hints, *res;
     char message[BUF_SIZE], buffer[BUF_SIZE * 2];
 
-    sock = socket(AF_INET, SOCK_STREAM, 0);
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;       // IPv4 or IPv6
+    hints.ai_socktype = SOCK_STREAM;
 
-    server.sin_family = AF_INET;
-    server.sin_port = htons(PORT);
-    server.sin_addr.s_addr = inet_addr("127.0.0.1");
+    getaddrinfo(argv[1], PORT, &hints, &res);
 
-    connect(sock, (struct sockaddr*)&server, sizeof(server));
+    sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    connect(sock, res->ai_addr, res->ai_addrlen);
+    freeaddrinfo(res);
 
     while (1)
     {
         printf("Enter message: ");
         fgets(message, BUF_SIZE, stdin);
+        
+        size_t len = strlen(message);
+        if (len > 0 && message[len - 1] == '\n')
+            message[len - 1] = '\0';
+
+        // Ignore empty message after trimming
+        if (strlen(message) == 0)
+            continue;
 
         if (strncmp(message, "exit", 4) == 0)
             break;
 
-        // Get timestamp
-        time_t now;
-        time(&now);
-        char *time_str = ctime(&now);
-        time_str[strlen(time_str)-1] = '\0'; // remove newline
+        time_t now = time(NULL);
+        char *ts = ctime(&now);
+        ts[strlen(ts) - 1] = '\0';
 
-        // Format: timestamp|message
         char send_buf[BUF_SIZE];
-        snprintf(send_buf, sizeof(send_buf), "%s|%s", time_str, message);
+        snprintf(send_buf, sizeof(send_buf), "%s|%s", ts, message);
 
         send(sock, send_buf, strlen(send_buf), 0);
 
