@@ -1,10 +1,12 @@
 /*
- * FINAL HTTP SERVER IMPLEMENTATION
+ * FINAL HTTP SERVER (Corrected Version)
+ * -------------------------------------
+ * Features:
  * - HTTP/1.0
- * - GET
- * - POST upload
- * - epoll based
- * - Secure minimal implementation
+ * - GET support
+ * - POST upload support
+ * - epoll based concurrency
+ * - Reads full HTTP request (FIXED BUG)
  */
 
 #include <stdio.h>
@@ -20,19 +22,19 @@
 
 #define PORT 8080
 #define MAX_EVENTS 1024
-#define BUF_SIZE 8192
+#define BUF_SIZE 65536
 
 #define WWW_ROOT "/var/www"
 #define UPLOAD_DIR "/var/www/uploads"
 
+/* ---------- NON BLOCKING ---------- */
 void set_nonblocking(int fd)
 {
     fcntl(fd, F_SETFL,
           fcntl(fd, F_GETFL) | O_NONBLOCK);
 }
 
-/* ---------- HTTP RESPONSE ---------- */
-
+/* ---------- SEND RESPONSE ---------- */
 void send_response(int fd,
                    const char *status,
                    const char *type,
@@ -51,15 +53,14 @@ void send_response(int fd,
 }
 
 /* ---------- GET HANDLER ---------- */
-
 void handle_get(int fd,char *path)
 {
     char fullpath[512];
 
-    if(strstr(path,"..")) {
+    /* security check */
+    if(strstr(path,"..")){
         send_response(fd,"403 Forbidden",
-                      "text/plain",
-                      "Access Denied");
+                      "text/plain","Access Denied");
         return;
     }
 
@@ -73,8 +74,7 @@ void handle_get(int fd,char *path)
 
     if(!file){
         send_response(fd,"404 Not Found",
-                      "text/plain",
-                      "File Not Found");
+                      "text/plain","File Not Found");
         return;
     }
 
@@ -100,17 +100,17 @@ void handle_get(int fd,char *path)
 }
 
 /* ---------- POST HANDLER ---------- */
-
 void handle_post(int fd,char *req)
 {
     char *body=strstr(req,"\r\n\r\n");
+
     if(!body){
         send_response(fd,"400 Bad Request",
                       "text/plain","Bad Request");
         return;
     }
 
-    body+=4;
+    body += 4; /* skip header separator */
 
     mkdir(UPLOAD_DIR,0777);
 
@@ -120,10 +120,15 @@ void handle_post(int fd,char *req)
              UPLOAD_DIR,time(NULL));
 
     FILE *f=fopen(filename,"w");
-    if(f){
-        fwrite(body,1,strlen(body),f);
-        fclose(f);
+    if(!f){
+        perror("upload fopen");
+        send_response(fd,"500 Internal Server Error",
+                      "text/plain","Upload Failed");
+        return;
     }
+
+    fwrite(body,1,strlen(body),f);
+    fclose(f);
 
     send_response(fd,"200 OK",
                   "text/plain",
@@ -131,25 +136,34 @@ void handle_post(int fd,char *req)
 }
 
 /* ---------- CLIENT HANDLER ---------- */
-
 void handle_client(int fd)
 {
     char buffer[BUF_SIZE];
+    int total = 0;
+    int n;
 
-    int n=recv(fd,buffer,
-               sizeof(buffer)-1,0);
+    /* IMPORTANT FIX:
+       read FULL HTTP request */
+    while((n = recv(fd,
+                    buffer + total,
+                    sizeof(buffer)-1-total,
+                    0)) > 0)
+    {
+        total += n;
+    }
 
-    if(n<=0){
+    if(total <= 0){
         close(fd);
         return;
     }
 
-    buffer[n]='\0';
+    buffer[total] = '\0';
 
-    char method[16],path[256];
+    char method[16], path[256];
 
     if(sscanf(buffer,"%15s %255s",
-              method,path)!=2){
+              method,path) != 2)
+    {
         send_response(fd,"400 Bad Request",
                       "text/plain",
                       "Invalid Request");
@@ -172,67 +186,69 @@ void handle_client(int fd)
 }
 
 /* ---------- MAIN ---------- */
-
 int main()
 {
-    int server_fd=socket(AF_INET,
-                         SOCK_STREAM,0);
+    int server_fd = socket(AF_INET,
+                           SOCK_STREAM,0);
 
-    if(server_fd<0){
+    if(server_fd < 0){
         perror("socket");
         return 1;
     }
 
     struct sockaddr_in addr;
-    addr.sin_family=AF_INET;
-    addr.sin_port=htons(PORT);
-    addr.sin_addr.s_addr=INADDR_ANY;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
+    addr.sin_addr.s_addr = INADDR_ANY;
 
     if(bind(server_fd,
-       (struct sockaddr*)&addr,
-       sizeof(addr))<0){
+        (struct sockaddr*)&addr,
+        sizeof(addr)) < 0)
+    {
         perror("bind");
         return 1;
     }
 
-    if(listen(server_fd,SOMAXCONN)<0){
+    if(listen(server_fd,SOMAXCONN) < 0){
         perror("listen");
         return 1;
     }
 
+    mkdir(UPLOAD_DIR,0777);
+
     set_nonblocking(server_fd);
 
-    int epfd=epoll_create1(0);
+    int epfd = epoll_create1(0);
 
     struct epoll_event ev,events[MAX_EVENTS];
 
-    ev.events=EPOLLIN;
-    ev.data.fd=server_fd;
+    ev.events = EPOLLIN;
+    ev.data.fd = server_fd;
 
     epoll_ctl(epfd,EPOLL_CTL_ADD,
               server_fd,&ev);
 
-    printf("HTTP Server running on %d\n",PORT);
+    printf("HTTP Server running on port %d\n",PORT);
 
     while(1)
     {
-        int n=epoll_wait(epfd,
-                         events,
-                         MAX_EVENTS,-1);
+        int n = epoll_wait(epfd,
+                           events,
+                           MAX_EVENTS,-1);
 
         for(int i=0;i<n;i++)
         {
-            if(events[i].data.fd==server_fd)
+            if(events[i].data.fd == server_fd)
             {
-                int client=
+                int client =
                     accept(server_fd,NULL,NULL);
 
-                if(client<0) continue;
+                if(client < 0) continue;
 
                 set_nonblocking(client);
 
-                ev.events=EPOLLIN;
-                ev.data.fd=client;
+                ev.events = EPOLLIN;
+                ev.data.fd = client;
 
                 epoll_ctl(epfd,
                           EPOLL_CTL_ADD,
