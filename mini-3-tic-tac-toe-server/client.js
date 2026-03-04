@@ -1,147 +1,87 @@
-/* =====================================
-   Tic Tac Toe Client (FINAL VERSION)
-   ===================================== */
-
 "use strict";
 
-/* ---------- CONFIG ---------- */
+const ws=new WebSocket("ws://localhost:9000");
 
-const WS_URL = "ws://localhost:9000";
+const board=document.getElementById("board");
+const statusText=document.getElementById("status");
 
-/* ---------- DOM ELEMENTS ---------- */
+let myTurn=false;
+let gameOver=false;
+let mySymbol="";
 
-const boardEl = document.getElementById("board");
-const statusText = document.getElementById("status");
+const cells=[];
 
-/* ---------- GAME STATE ---------- */
+for(let i=0;i<9;i++){
 
-let socket = null;
-let mySymbol = "";
-let myTurn = false;
-let gameOver = false;
+const cell=document.createElement("div");
+cell.className="cell";
 
-const cells = [];
+cell.onclick=()=>sendMove(i);
 
-/* ---------- CREATE BOARD ---------- */
+board.appendChild(cell);
 
-const createBoard = () => {
-    for (let i = 0; i < 9; i++) {
+cells.push(cell);
+}
 
-        const cell = document.createElement("div");
-        cell.classList.add("cell");
-        cell.dataset.index = i;
+function sendMove(pos){
 
-        cell.addEventListener("click", () => sendMove(i));
+if(!myTurn||gameOver) return;
 
-        boardEl.appendChild(cell);
-        cells.push(cell);
-    }
+if(cells[pos].textContent!=="") return;
+
+ws.send(`MOVE ${pos}`);
+}
+
+function resetBoard(){
+
+cells.forEach(c=>c.textContent="");
+
+gameOver=false;
+}
+
+ws.onmessage=(e)=>{
+
+const msg=e.data.split(" ");
+
+switch(msg[0]){
+
+case "INFO":
+mySymbol=msg[3];
+statusText.textContent=`You are ${mySymbol}`;
+break;
+
+case "MOVE":
+cells[msg[1]].textContent=msg[2];
+break;
+
+case "YOUR_TURN":
+myTurn=true;
+statusText.textContent="Your Turn";
+break;
+
+case "OPPONENT_TURN":
+myTurn=false;
+statusText.textContent="Opponent Turn";
+break;
+
+case "WIN":
+gameOver=true;
+statusText.textContent="🎉 You Win!";
+break;
+
+case "LOSE":
+gameOver=true;
+statusText.textContent="😢 You Lose!";
+break;
+
+case "DRAW":
+gameOver=true;
+statusText.textContent="🤝 Draw!";
+break;
+
+case "RESTART":
+resetBoard();
+statusText.textContent="New Game Started";
+break;
+}
 };
-
-/* ---------- CONNECT WEBSOCKET ---------- */
-
-const connect = () => {
-
-    socket = new WebSocket(WS_URL);
-
-    socket.addEventListener("open", () => {
-        statusText.textContent =
-            "Connected. Waiting for opponent...";
-    });
-
-    socket.addEventListener("message", handleMessage);
-
-    socket.addEventListener("close", () => {
-        statusText.textContent =
-            "Disconnected from server.";
-        myTurn = false;
-    });
-
-    socket.addEventListener("error", () => {
-        statusText.textContent = "Connection error.";
-    });
-};
-
-/* ---------- SEND MOVE ---------- */
-
-const sendMove = (position) => {
-
-    /* allow move ONLY if valid turn */
-    if (!socket ||
-        socket.readyState !== WebSocket.OPEN ||
-        !myTurn ||
-        gameOver)
-        return;
-
-    if (cells[position].textContent !== "")
-        return; // already filled
-
-    socket.send(`MOVE ${position}`);
-};
-
-/* ---------- HANDLE SERVER MESSAGES ---------- */
-
-const handleMessage = (event) => {
-
-    const message = event.data.trim();
-    const parts = message.split(" ");
-    const command = parts[0];
-
-    switch (command) {
-
-        /* PLAYER ASSIGNMENT */
-        case "START":
-            mySymbol = parts[1];
-            statusText.textContent = `You are ${mySymbol}`;
-            break;
-
-        /* BOARD UPDATE */
-        case "MOVE": {
-            const index = Number(parts[1]);
-            const symbol = parts[2];
-
-            if (cells[index])
-                cells[index].textContent = symbol;
-
-            break;
-        }
-
-        /* TURN CONTROL */
-        case "YOUR_TURN":
-            myTurn = true;
-            statusText.textContent = "✅ Your Turn";
-            break;
-
-        case "OPPONENT_TURN":
-            myTurn = false;
-            statusText.textContent = "⏳ Opponent's Turn";
-            break;
-
-        /* GAME RESULTS */
-        case "WIN":
-            gameOver = true;
-            statusText.textContent = "🎉 You Win!";
-            myTurn = false;
-            break;
-
-        case "LOSE":
-            gameOver = true;
-            statusText.textContent = "😢 You Lose!";
-            myTurn = false;
-            break;
-
-        case "DRAW":
-            gameOver = true;
-            statusText.textContent = "🤝 Draw!";
-            myTurn = false;
-            break;
-
-        default:
-            console.warn("Unknown message:", message);
-    }
-};
-
-/* ---------- START APPLICATION ---------- */
-
-createBoard();
-connect();

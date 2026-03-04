@@ -1,23 +1,40 @@
 body{
-    text-align:center;
-    font-family:Arial;
+background:#121212;
+color:white;
+font-family:Arial;
+display:flex;
+justify-content:center;
+align-items:center;
+height:100vh;
+}
+
+.container{
+background:#1e1e1e;
+padding:30px;
+border-radius:10px;
+text-align:center;
 }
 
 #board{
-    display:grid;
-    grid-template-columns:repeat(3,100px);
-    gap:5px;
-    width:315px;
-    margin:auto;
+display:grid;
+grid-template-columns:repeat(3,100px);
+gap:8px;
+margin-top:20px;
 }
 
 .cell{
-    width:100px;
-    height:100px;
-    font-size:40px;
-    background:#eee;
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    cursor:pointer;
+width:100px;
+height:100px;
+background:#333;
+display:flex;
+justify-content:center;
+align-items:center;
+font-size:40px;
+cursor:pointer;
+border-radius:8px;
+transition:.2s;
+}
+
+.cell:hover{
+background:#444;
 }
