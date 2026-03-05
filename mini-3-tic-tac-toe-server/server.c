@@ -1,11 +1,6 @@
 /*
- * Tic Tac Toe WebSocket Server (Enhanced Version)
- * Features:
- * - Multiplayer pairing
- * - Turn based gameplay
- * - Win / Lose / Draw detection
- * - Automatic restart
- * - Player disconnect handling
+ * Tic Tac Toe WebSocket Server
+ * Manual restart version
  */
 
 #include <stdio.h>
@@ -14,10 +9,11 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
+#include <signal.h>
 #include <openssl/sha.h>
 #include <openssl/evp.h>
 
-#define PORT 9000
+#define PORT 9001
 #define MAX_CLIENTS 100
 #define BUF_SIZE 4096
 
@@ -35,7 +31,39 @@ Game games[MAX_CLIENTS/2];
 int client_count=0;
 int game_count=0;
 
-/* ---------------- SEND WS FRAME ---------------- */
+void ws_send(int fd,const char *msg);
+int websocket_handshake(int fd,char *req);
+
+int alloc_game_slot(){
+
+    for(int i=0;i<game_count;i++)
+        if(!games[i].active) return i;
+
+    if(game_count>=MAX_CLIENTS/2) return -1;
+
+    return game_count++;
+}
+
+void disconnect_from_games(int fd){
+
+    for(int i=0;i<game_count;i++){
+
+        Game *g=&games[i];
+        if(!g->active) continue;
+
+        if(fd!=g->p1 && fd!=g->p2) continue;
+
+        int other=(fd==g->p1)?g->p2:g->p1;
+        if(other>=0)
+            ws_send(other,"OPPONENT_LEFT");
+
+        g->active=0;
+        g->p1=-1;
+        g->p2=-1;
+    }
+}
+
+/* -------- SEND WS FRAME -------- */
 
 void ws_send(int fd,const char *msg){
 
@@ -47,15 +75,15 @@ void ws_send(int fd,const char *msg){
 
     memcpy(frame+2,msg,len);
 
-    send(fd,frame,len+2,0);
+    send(fd,frame,len+2,MSG_NOSIGNAL);
 }
 
-/* ---------------- HANDSHAKE ---------------- */
+/* -------- HANDSHAKE -------- */
 
-void websocket_handshake(int fd,char *req){
+int websocket_handshake(int fd,char *req){
 
     char *key=strstr(req,"Sec-WebSocket-Key:");
-    if(!key) return;
+    if(!key) return -1;
 
     key+=19;
     while(*key==' ') key++;
@@ -80,10 +108,11 @@ void websocket_handshake(int fd,char *req){
     "Connection: Upgrade\r\n"
     "Sec-WebSocket-Accept: %s\r\n\r\n",accept);
 
-    send(fd,response,strlen(response),0);
+    if(send(fd,response,strlen(response),MSG_NOSIGNAL)<0) return -1;
+    return 0;
 }
 
-/* ---------------- GAME LOGIC ---------------- */
+/* -------- WIN CHECK -------- */
 
 int winner(char *b){
 
@@ -109,7 +138,7 @@ int draw(char *b){
     return 1;
 }
 
-/* ---------------- RESET GAME ---------------- */
+/* -------- RESET GAME -------- */
 
 void reset_game(Game *g){
 
@@ -118,35 +147,36 @@ void reset_game(Game *g){
 
     g->turn=0;
 
-    ws_send(g->p1,"RESTART");
-    ws_send(g->p2,"RESTART");
+    ws_send(g->p1,"RESET");
+    ws_send(g->p2,"RESET");
 
     ws_send(g->p1,"YOUR_TURN");
     ws_send(g->p2,"OPPONENT_TURN");
 }
 
-/* ---------------- PAIR PLAYERS ---------------- */
+/* -------- PAIR PLAYERS -------- */
 
 void pair_players(){
 
     if(client_count%2!=0) return;
 
-    Game *g=&games[game_count++];
+    int slot=alloc_game_slot();
+    if(slot==-1) return;
+
+    Game *g=&games[slot];
 
     g->p1=clients[client_count-2];
     g->p2=clients[client_count-1];
-
     g->active=1;
 
+    ws_send(g->p1,"INFO X");
+    ws_send(g->p2,"INFO O");
     reset_game(g);
-
-    ws_send(g->p1,"INFO You are X");
-    ws_send(g->p2,"INFO You are O");
 
     printf("Game paired\n");
 }
 
-/* ---------------- HANDLE MOVE ---------------- */
+/* -------- HANDLE MOVE -------- */
 
 void handle_move(int fd,int pos){
 
@@ -187,18 +217,12 @@ void handle_move(int fd,int pos){
                 ws_send(g->p1,"LOSE");
             }
 
-            sleep(3);
-            reset_game(g);
             return;
         }
 
         if(draw(g->board)){
-
             ws_send(g->p1,"DRAW");
             ws_send(g->p2,"DRAW");
-
-            sleep(3);
-            reset_game(g);
             return;
         }
 
@@ -214,7 +238,7 @@ void handle_move(int fd,int pos){
     }
 }
 
-/* ---------------- RECEIVE FRAME ---------------- */
+/* -------- RECEIVE FRAME -------- */
 
 int ws_receive(int fd,char *out){
 
@@ -238,23 +262,38 @@ int ws_receive(int fd,char *out){
     return len;
 }
 
-/* ---------------- MAIN SERVER ---------------- */
+/* -------- MAIN -------- */
 
 int main(){
 
     int server_fd;
     struct sockaddr_in addr;
+    int opt=1;
 
     fd_set readfds;
 
+    signal(SIGPIPE,SIG_IGN);
+
     server_fd=socket(AF_INET,SOCK_STREAM,0);
+    if(server_fd<0){
+        perror("socket");
+        return 1;
+    }
+
+    setsockopt(server_fd,SOL_SOCKET,SO_REUSEADDR,&opt,sizeof(opt));
 
     addr.sin_family=AF_INET;
     addr.sin_port=htons(PORT);
     addr.sin_addr.s_addr=INADDR_ANY;
 
-    bind(server_fd,(struct sockaddr*)&addr,sizeof(addr));
-    listen(server_fd,10);
+    if(bind(server_fd,(struct sockaddr*)&addr,sizeof(addr))<0){
+        perror("bind");
+        return 1;
+    }
+    if(listen(server_fd,10)<0){
+        perror("listen");
+        return 1;
+    }
 
     printf("Server running on port %d\n",PORT);
 
@@ -276,14 +315,29 @@ int main(){
         if(FD_ISSET(server_fd,&readfds)){
 
             int client_fd=accept(server_fd,NULL,NULL);
+            if(client_fd<0) continue;
 
             char buffer[BUF_SIZE];
+            int total=0;
+            int n=0;
 
-            int n=recv(client_fd,buffer,sizeof(buffer)-1,0);
-            buffer[n]=0;
+            while(total<BUF_SIZE-1){
+                n=recv(client_fd,buffer+total,sizeof(buffer)-1-total,0);
+                if(n<=0) break;
+                total+=n;
+                buffer[total]=0;
+                if(strstr(buffer,"\r\n\r\n")) break;
+            }
 
-            websocket_handshake(client_fd,buffer);
+            if(total<=0 || websocket_handshake(client_fd,buffer)<0){
+                close(client_fd);
+                continue;
+            }
 
+            if(client_count>=MAX_CLIENTS){
+                close(client_fd);
+                continue;
+            }
             clients[client_count++]=client_fd;
 
             pair_players();
@@ -300,6 +354,7 @@ int main(){
                 int r=ws_receive(fd,msg);
 
                 if(r<=0){
+                    disconnect_from_games(fd);
                     close(fd);
                     clients[i]=clients[--client_count];
                     i--;
@@ -308,6 +363,13 @@ int main(){
 
                 if(strncmp(msg,"MOVE",4)==0)
                     handle_move(fd,atoi(msg+5));
+
+                if(strncmp(msg,"NEW_GAME",8)==0){
+                    for(int j=0;j<game_count;j++){
+                        if(games[j].active && (fd==games[j].p1||fd==games[j].p2))
+                            reset_game(&games[j]);
+                    }
+                }
             }
         }
     }

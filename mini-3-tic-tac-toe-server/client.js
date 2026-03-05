@@ -1,19 +1,21 @@
 "use strict";
 
-const ws=new WebSocket("ws://localhost:9000");
+const host=window.location.hostname || "127.0.0.1";
+const ws=new WebSocket(`ws://${host}:9001`);
 
 const board=document.getElementById("board");
-const statusText=document.getElementById("status");
+const status=document.getElementById("status");
+const newGameBtn=document.getElementById("newGameBtn");
 
+let mySymbol="";
 let myTurn=false;
 let gameOver=false;
-let mySymbol="";
 
 const cells=[];
 
 for(let i=0;i<9;i++){
 
-const cell=document.createElement("div");
+let cell=document.createElement("div");
 cell.className="cell";
 
 cell.onclick=()=>sendMove(i);
@@ -21,6 +23,11 @@ cell.onclick=()=>sendMove(i);
 board.appendChild(cell);
 
 cells.push(cell);
+}
+
+function updateStatus(turn){
+
+status.textContent=`You are ${mySymbol} | ${turn}`;
 }
 
 function sendMove(pos){
@@ -41,13 +48,13 @@ gameOver=false;
 
 ws.onmessage=(e)=>{
 
-const msg=e.data.split(" ");
+let msg=e.data.split(" ");
 
 switch(msg[0]){
 
 case "INFO":
-mySymbol=msg[3];
-statusText.textContent=`You are ${mySymbol}`;
+mySymbol=msg[1];
+updateStatus("Waiting...");
 break;
 
 case "MOVE":
@@ -56,32 +63,42 @@ break;
 
 case "YOUR_TURN":
 myTurn=true;
-statusText.textContent="Your Turn";
+updateStatus("Your Turn");
 break;
 
 case "OPPONENT_TURN":
 myTurn=false;
-statusText.textContent="Opponent Turn";
+updateStatus("Opponent Turn");
 break;
 
 case "WIN":
 gameOver=true;
-statusText.textContent="🎉 You Win!";
+status.textContent="You Win!";
 break;
 
 case "LOSE":
 gameOver=true;
-statusText.textContent="😢 You Lose!";
+status.textContent="You Lose!";
 break;
 
 case "DRAW":
 gameOver=true;
-statusText.textContent="🤝 Draw!";
+status.textContent="Draw!";
 break;
 
-case "RESTART":
+case "OPPONENT_LEFT":
+gameOver=true;
+myTurn=false;
+status.textContent="Opponent left. Waiting for a new game.";
+break;
+
+case "RESET":
 resetBoard();
-statusText.textContent="New Game Started";
+updateStatus("New Game Started");
 break;
 }
+};
+
+newGameBtn.onclick=()=>{
+ws.send("NEW_GAME");
 };
