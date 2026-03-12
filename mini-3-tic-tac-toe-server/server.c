@@ -1,6 +1,6 @@
 /*
  * Tic Tac Toe WebSocket Server
- * Manual restart version
+ * 
  */
 
 #include <stdio.h>
@@ -23,6 +23,7 @@ typedef struct{
     char board[9];
     int turn;
     int active;
+    int finished;
 }Game;
 
 int clients[MAX_CLIENTS];
@@ -34,6 +35,7 @@ int game_count=0;
 void ws_send(int fd,const char *msg);
 int websocket_handshake(int fd,char *req);
 
+/* Reuse an inactive game slot before growing the game table. */
 int alloc_game_slot(){
 
     for(int i=0;i<game_count;i++)
@@ -44,6 +46,7 @@ int alloc_game_slot(){
     return game_count++;
 }
 
+/* Remove a disconnected client from any active match and notify the opponent. */
 void disconnect_from_games(int fd){
 
     for(int i=0;i<game_count;i++){
@@ -58,6 +61,7 @@ void disconnect_from_games(int fd){
             ws_send(other,"OPPONENT_LEFT");
 
         g->active=0;
+        g->finished=1;
         g->p1=-1;
         g->p2=-1;
     }
@@ -69,6 +73,7 @@ void ws_send(int fd,const char *msg){
 
     unsigned char frame[1024];
     int len=strlen(msg);
+    if(len<0 || len>125) return;
 
     frame[0]=0x81;
     frame[1]=len;
@@ -102,6 +107,7 @@ int websocket_handshake(int fd,char *req){
 
     char response[512];
 
+    /* Complete the standard WebSocket accept handshake. */
     sprintf(response,
     "HTTP/1.1 101 Switching Protocols\r\n"
     "Upgrade: websocket\r\n"
@@ -146,6 +152,7 @@ void reset_game(Game *g){
         g->board[i]=' ';
 
     g->turn=0;
+    g->finished=0;
 
     ws_send(g->p1,"RESET");
     ws_send(g->p2,"RESET");
@@ -165,9 +172,11 @@ void pair_players(){
 
     Game *g=&games[slot];
 
+    /* The last two unpaired clients become a new match. */
     g->p1=clients[client_count-2];
     g->p2=clients[client_count-1];
     g->active=1;
+    g->finished=0;
 
     ws_send(g->p1,"INFO X");
     ws_send(g->p2,"INFO O");
@@ -185,6 +194,7 @@ void handle_move(int fd,int pos){
         Game *g=&games[i];
 
         if(!g->active) continue;
+        if(g->finished) continue;
 
         int player=-1;
 
@@ -197,6 +207,7 @@ void handle_move(int fd,int pos){
         if(pos<0||pos>8) return;
         if(g->board[pos]!=' ') return;
 
+        /* Player 0 is always X and player 1 is always O. */
         char mark=player==0?'X':'O';
 
         g->board[pos]=mark;
@@ -208,6 +219,7 @@ void handle_move(int fd,int pos){
         ws_send(g->p2,msg);
 
         if(winner(g->board)){
+            g->finished=1;
 
             if(player==0){
                 ws_send(g->p1,"WIN");
@@ -221,6 +233,7 @@ void handle_move(int fd,int pos){
         }
 
         if(draw(g->board)){
+            g->finished=1;
             ws_send(g->p1,"DRAW");
             ws_send(g->p2,"DRAW");
             return;
@@ -246,9 +259,21 @@ int ws_receive(int fd,char *out){
 
     int n=recv(fd,buf,sizeof(buf),0);
     if(n<=0) return -1;
+    if(n<2) return -1;
 
+    int opcode=buf[0]&0x0F;
+    if(opcode==0x8) return -1;
+    if(opcode!=0x1) return -1;
+
+    /* This server only accepts short masked text frames from browsers. */
+    int masked=buf[1]&0x80;
     int len=buf[1]&127;
     int index=2;
+
+    if(!masked) return -1;
+    if(len>=126) return -1;
+    if(n<index+4+len) return -1;
+    if(len>=255) return -1;
 
     unsigned char mask[4];
     memcpy(mask,buf+index,4);
@@ -326,6 +351,7 @@ int main(){
                 if(n<=0) break;
                 total+=n;
                 buffer[total]=0;
+                /* HTTP headers end with a blank line. */
                 if(strstr(buffer,"\r\n\r\n")) break;
             }
 

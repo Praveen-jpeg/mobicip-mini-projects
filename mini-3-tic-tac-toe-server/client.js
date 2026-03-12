@@ -13,6 +13,7 @@ let gameOver=false;
 
 const cells=[];
 
+// Build the 3x3 board dynamically and map each cell to its move index.
 for(let i=0;i<9;i++){
 
 let cell=document.createElement("div");
@@ -33,6 +34,7 @@ status.textContent=`You are ${mySymbol} | ${turn}`;
 function sendMove(pos){
 
 if(!myTurn||gameOver) return;
+if(ws.readyState!==WebSocket.OPEN) return;
 
 if(cells[pos].textContent!=="") return;
 
@@ -46,6 +48,7 @@ cells.forEach(c=>c.textContent="");
 gameOver=false;
 }
 
+// The server sends small text commands that drive the whole UI state.
 ws.onmessage=(e)=>{
 
 let msg=e.data.split(" ");
@@ -99,6 +102,22 @@ break;
 }
 };
 
+ws.onopen=()=>{
+status.textContent="Connected. Waiting for opponent...";
+};
+
+ws.onclose=()=>{
+myTurn=false;
+gameOver=true;
+status.textContent="Connection closed.";
+};
+
+ws.onerror=()=>{
+myTurn=false;
+status.textContent="Connection error.";
+};
+
 newGameBtn.onclick=()=>{
+if(ws.readyState!==WebSocket.OPEN) return;
 ws.send("NEW_GAME");
 };
