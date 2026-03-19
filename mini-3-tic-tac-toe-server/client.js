@@ -60,6 +60,12 @@ mySymbol=msg[1];
 updateStatus("Waiting...");
 break;
 
+case "WAITING":
+myTurn=false;
+gameOver=false;
+status.textContent="Connected. Waiting for opponent...";
+break;
+
 case "MOVE":
 cells[msg[1]].textContent=msg[2];
 break;

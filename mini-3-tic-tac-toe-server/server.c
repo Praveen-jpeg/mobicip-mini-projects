@@ -34,6 +34,8 @@ int game_count=0;
 
 void ws_send(int fd,const char *msg);
 int websocket_handshake(int fd,char *req);
+int client_in_active_game(int fd);
+void notify_waiting_clients(void);
 
 /* Reuse an inactive game slot before growing the game table. */
 int alloc_game_slot(){
@@ -44,6 +46,27 @@ int alloc_game_slot(){
     if(game_count>=MAX_CLIENTS/2) return -1;
 
     return game_count++;
+}
+
+/* Check whether a socket is already assigned to an active game. */
+int client_in_active_game(int fd){
+
+    for(int i=0;i<game_count;i++){
+        if(!games[i].active) continue;
+        if(fd==games[i].p1 || fd==games[i].p2) return 1;
+    }
+
+    return 0;
+}
+
+/* Tell idle clients they are connected but still waiting to be paired. */
+void notify_waiting_clients(void){
+
+    for(int i=0;i<client_count;i++){
+        if(client_in_active_game(clients[i])) continue;
+        printf("[debug] client fd=%d is waiting for an opponent\n",clients[i]);
+        ws_send(clients[i],"WAITING");
+    }
 }
 
 /* Remove a disconnected client from any active match and notify the opponent. */
@@ -57,8 +80,10 @@ void disconnect_from_games(int fd){
         if(fd!=g->p1 && fd!=g->p2) continue;
 
         int other=(fd==g->p1)?g->p2:g->p1;
-        if(other>=0)
+        if(other>=0){
+            printf("[debug] client fd=%d disconnected, notifying opponent fd=%d\n",fd,other);
             ws_send(other,"OPPONENT_LEFT");
+        }
 
         g->active=0;
         g->finished=1;
@@ -165,24 +190,42 @@ void reset_game(Game *g){
 
 void pair_players(){
 
-    if(client_count%2!=0) return;
+    while(1){
 
-    int slot=alloc_game_slot();
-    if(slot==-1) return;
+        int p1=-1;
+        int p2=-1;
 
-    Game *g=&games[slot];
+        for(int i=0;i<client_count;i++){
+            if(client_in_active_game(clients[i])) continue;
 
-    /* The last two unpaired clients become a new match. */
-    g->p1=clients[client_count-2];
-    g->p2=clients[client_count-1];
-    g->active=1;
-    g->finished=0;
+            if(p1==-1){
+                p1=clients[i];
+            }else{
+                p2=clients[i];
+                break;
+            }
+        }
 
-    ws_send(g->p1,"INFO X");
-    ws_send(g->p2,"INFO O");
-    reset_game(g);
+        if(p1==-1 || p2==-1) break;
 
-    printf("Game paired\n");
+        int slot=alloc_game_slot();
+        if(slot==-1) break;
+
+        Game *g=&games[slot];
+
+        g->p1=p1;
+        g->p2=p2;
+        g->active=1;
+        g->finished=0;
+
+        ws_send(g->p1,"INFO X");
+        ws_send(g->p2,"INFO O");
+        reset_game(g);
+
+        printf("[debug] paired game slot=%d p1(fd=%d,X) with p2(fd=%d,O)\n",slot,g->p1,g->p2);
+    }
+
+    notify_waiting_clients();
 }
 
 /* -------- HANDLE MOVE -------- */
@@ -341,6 +384,7 @@ int main(){
 
             int client_fd=accept(server_fd,NULL,NULL);
             if(client_fd<0) continue;
+            printf("[debug] accepted tcp client fd=%d\n",client_fd);
 
             char buffer[BUF_SIZE];
             int total=0;
@@ -351,7 +395,7 @@ int main(){
                 if(n<=0) break;
                 total+=n;
                 buffer[total]=0;
-                /* HTTP headers end with a blank line. */
+                /* Stop reading once we reach the blank line that ends the HTTP headers. */
                 if(strstr(buffer,"\r\n\r\n")) break;
             }
 
@@ -365,6 +409,7 @@ int main(){
                 continue;
             }
             clients[client_count++]=client_fd;
+            printf("[debug] websocket handshake complete for fd=%d, total clients=%d\n",client_fd,client_count);
 
             pair_players();
         }
@@ -381,8 +426,10 @@ int main(){
 
                 if(r<=0){
                     disconnect_from_games(fd);
+                    printf("[debug] removing client fd=%d from client list\n",fd);
                     close(fd);
                     clients[i]=clients[--client_count];
+                    pair_players();
                     i--;
                     continue;
                 }
