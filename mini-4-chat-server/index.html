@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Public Chat</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="app">
+    <section class="hero">
+      <p class="eyebrow">Chat Application</p>
+      <h1>Simple Chat Server</h1>
+      <p class="subtitle">
+        Real-time public chat with a C server and a browser-based client.
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="join-row">
+        <input id="username" type="text" maxlength="31" placeholder="Enter username">
+        <button id="joinBtn" type="button">Join Chat</button>
+      </div>
+
+      <p id="status" class="status">Connecting to server...</p>
+
+      <div id="messages" class="messages"></div>
+
+      <form id="chatForm" class="composer">
+        <input id="messageInput" type="text" maxlength="500" placeholder="Type a public message">
+        <button id="sendBtn" type="submit">Send</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="/client.js"></script>
+</body>
+</html>
