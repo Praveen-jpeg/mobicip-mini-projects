@@ -74,14 +74,25 @@ h1 {
   gap: 10px;
 }
 
+.composer {
+  flex-direction: column;
+}
+
+.mode-row {
+  display: flex;
+  gap: 10px;
+}
+
 input,
+select,
 button {
   border-radius: 14px;
   border: 1px solid var(--line);
   font: inherit;
 }
 
-input {
+input,
+select {
   width: 100%;
   padding: 13px 14px;
   background: #fff;
@@ -123,6 +134,11 @@ button {
   border-left: 5px solid var(--accent);
 }
 
+.message.private {
+  border-left: 5px solid #f97316;
+  background: rgba(255, 247, 237, 0.96);
+}
+
 .message.system {
   border-left: 5px solid var(--system);
   background: rgba(239, 246, 255, 0.95);
@@ -156,6 +172,7 @@ button {
   }
 
   .join-row,
+  .mode-row,
   .composer {
     flex-direction: column;
   }

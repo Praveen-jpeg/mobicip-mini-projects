@@ -10,7 +10,7 @@
   <main class="app">
     <section class="hero">
       <p class="eyebrow">Chat Application</p>
-      <h1>Simple Chat Server</h1>
+      <h1>Chat Server</h1>
       <p class="subtitle">
         Real-time public chat with a C server and a browser-based client.
       </p>
@@ -27,6 +27,13 @@
       <div id="messages" class="messages"></div>
 
       <form id="chatForm" class="composer">
+        <div class="mode-row">
+          <select id="chatModeSelect">
+            <option value="public">Public Chat</option>
+            <option value="private">Private Chat</option>
+          </select>
+          <input id="recipientInput" type="text" maxlength="31" placeholder="Recipient username">
+        </div>
         <input id="messageInput" type="text" maxlength="500" placeholder="Type a public message">
         <button id="sendBtn" type="submit">Send</button>
       </form>
